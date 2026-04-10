@@ -7,6 +7,7 @@ const {
   handleYourGenerations,
   handleListMyImages,
   handleTrending,
+  handleLikedPosts,
   handleToggleLike,
 } = require("../controllers/imageController");
 
@@ -19,6 +20,7 @@ router.post("/guest-generate", handleGuestGenerateImage);
 router.post("/generate", verifyToken, handleGenerateImage);
 router.post("/entries", verifyToken, handleStorePromptImage);
 router.get("/your-generations", verifyToken, handleYourGenerations);
+router.get("/liked", verifyToken, handleLikedPosts);
 router.get("/mine", verifyToken, handleListMyImages);
 router.post("/:id/like", verifyToken, handleToggleLike);
 

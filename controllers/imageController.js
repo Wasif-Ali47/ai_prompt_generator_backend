@@ -45,6 +45,15 @@ function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
 }
 
+function parseTrendingExcludeIds(raw) {
+  if (raw == null || typeof raw !== "string") return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+}
+
 function userEmailForStorage(req, res) {
   const email = req.user?.email;
   if (!email || typeof email !== "string" || !email.trim()) {
@@ -342,6 +351,8 @@ const TRENDING_SAMPLE_SIZE = 10;
 
 async function handleTrending(req, res) {
   try {
+    const excludeIds = parseTrendingExcludeIds(req.query.exclude);
+
     const pipeline = [
       {
         $lookup: {
@@ -361,21 +372,37 @@ async function handleTrending(req, res) {
       },
       { $sort: { likesCount: -1, createdAt: -1 } },
       { $limit: TRENDING_POOL_MAX },
-      { $sample: { size: TRENDING_SAMPLE_SIZE } },
-      {
-        $project: {
-          prompt: 1,
-          revisedPrompt: 1,
-          imageUrl: 1,
-          likesCount: 1,
-          createdAt: 1,
-          authorName: { $arrayElemAt: ["$author.name", 0] },
-          authorId: { $arrayElemAt: ["$author._id", 0] },
-        },
-      },
     ];
 
-    const rows = await GeneratedImage.aggregate(pipeline);
+    if (excludeIds.length) {
+      pipeline.push({ $match: { _id: { $nin: excludeIds } } });
+    }
+
+    pipeline.push({
+      $facet: {
+        countArr: [{ $count: "c" }],
+        rows: [
+          { $sample: { size: TRENDING_SAMPLE_SIZE } },
+          {
+            $project: {
+              prompt: 1,
+              revisedPrompt: 1,
+              imageUrl: 1,
+              likesCount: 1,
+              createdAt: 1,
+              authorName: { $arrayElemAt: ["$author.name", 0] },
+              authorId: { $arrayElemAt: ["$author._id", 0] },
+            },
+          },
+        ],
+      },
+    });
+
+    const aggOut = await GeneratedImage.aggregate(pipeline);
+    const fac = aggOut[0] || { countArr: [], rows: [] };
+    const poolAfterExclude = fac.countArr[0]?.c ?? 0;
+    const rows = fac.rows || [];
+    const hasMore = poolAfterExclude > rows.length;
 
     const ids = rows.map((r) => r._id);
     let likedSet = new Set();
@@ -411,6 +438,79 @@ async function handleTrending(req, res) {
       limit: TRENDING_SAMPLE_SIZE,
       skip: 0,
       poolMax: TRENDING_POOL_MAX,
+      hasMore,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: NETWORK_ERROR });
+  }
+}
+
+/** Authenticated: images this user has liked (newest like first). */
+async function handleLikedPosts(req, res) {
+  const userId = req.user._id;
+  const limit = Math.min(
+    Math.max(parseInt(req.query.limit, 10) || 50, 1),
+    100
+  );
+  const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+
+  try {
+    const [total, likes] = await Promise.all([
+      ImageLike.countDocuments({ userId }),
+      ImageLike.find({ userId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: "imageId",
+          select: "prompt revisedPrompt imageUrl likesCount createdAt userId",
+        })
+        .lean(),
+    ]);
+
+    const rows = likes
+      .map((l) => {
+        const img = l.imageId;
+        if (!img || !img._id) return null;
+        return img;
+      })
+      .filter(Boolean);
+
+    const authorIds = [
+      ...new Set(rows.map((doc) => String(doc.userId)).filter(Boolean)),
+    ];
+    let nameById = new Map();
+    if (authorIds.length) {
+      const oids = authorIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+      const authors = await User.find({
+        _id: { $in: oids.map((id) => new mongoose.Types.ObjectId(id)) },
+      })
+        .select("name")
+        .lean();
+      nameById = new Map(authors.map((a) => [String(a._id), a.name]));
+    }
+
+    const items = rows.map((doc) => ({
+      id: doc._id,
+      prompt: doc.prompt,
+      revisedPrompt: doc.revisedPrompt,
+      imageUrl: doc.imageUrl,
+      likesCount: doc.likesCount ?? 0,
+      createdAt: doc.createdAt,
+      likedByMe: true,
+      author:
+        doc.userId && nameById.has(String(doc.userId))
+          ? { name: nameById.get(String(doc.userId)), id: doc.userId }
+          : null,
+    }));
+
+    return res.json({
+      section: "liked",
+      total,
+      limit,
+      skip,
+      items,
     });
   } catch (err) {
     console.error(err);
@@ -485,5 +585,6 @@ module.exports = {
   handleYourGenerations,
   handleListMyImages,
   handleTrending,
+  handleLikedPosts,
   handleToggleLike,
 };
