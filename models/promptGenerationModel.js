@@ -8,6 +8,12 @@ const promptGenerationSchema = new mongoose.Schema(
       index: true,
       default: null,
     },
+    generatedBy: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true,
+    },
     input: { type: String, required: true, trim: true },
     generatedPrompt: { type: String, required: true, trim: true },
     model: { type: String, default: "" },

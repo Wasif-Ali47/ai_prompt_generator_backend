@@ -26,16 +26,19 @@ function buildUserMessage(body) {
   return `Idea:\n${input}\n\nExtra context or constraints:\n${extra}`;
 }
 
-function resolveAuthUserId(req) {
+function resolveAuthContext(req) {
   const raw = req.headers.authorization || "";
-  if (!raw.startsWith("Bearer ")) return null;
+  if (!raw.startsWith("Bearer ")) return { userId: null, email: null };
   const token = raw.replace("Bearer ", "").trim();
-  if (!token) return null;
+  if (!token) return { userId: null, email: null };
   try {
     const decoded = getUser(token);
-    return decoded?._id ? decoded._id.toString() : null;
+    return {
+      userId: decoded?._id ? decoded._id.toString() : null,
+      email: decoded?.email ? decoded.email.toString().trim().toLowerCase() : null,
+    };
   } catch (_) {
-    return null;
+    return { userId: null, email: null };
   }
 }
 
@@ -80,15 +83,17 @@ async function handleGeneratePrompt(req, res) {
   }
 
   try {
-    const authUserId = resolveAuthUserId(req);
+    const auth = resolveAuthContext(req);
     const doc = await PromptGeneration.create({
-      userId: authUserId,
+      userId: auth.userId,
+      generatedBy: auth.email || "",
       input: typeof req.body.input === "string" ? req.body.input.trim() : userContent,
       generatedPrompt,
       model,
     });
     return res.status(201).json({
       id: doc._id,
+      generatedBy: doc.generatedBy,
       input: doc.input,
       generatedPrompt: doc.generatedPrompt,
       model: doc.model,
@@ -116,7 +121,7 @@ async function handleListPrompts(req, res) {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .select("input generatedPrompt model createdAt updatedAt")
+        .select("input generatedPrompt model generatedBy createdAt updatedAt")
         .lean(),
     ]);
 
@@ -126,6 +131,7 @@ async function handleListPrompts(req, res) {
       skip,
       items: rows.map((row) => ({
         id: row._id,
+        generatedBy: row.generatedBy || "",
         input: row.input,
         generatedPrompt: row.generatedPrompt,
         model: row.model,
@@ -159,6 +165,7 @@ async function handleGetPrompt(req, res) {
     }
     return res.json({
       id: row._id,
+      generatedBy: row.generatedBy || "",
       input: row.input,
       generatedPrompt: row.generatedPrompt,
       model: row.model,
