@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const OpenAI = require("openai");
 const PromptGeneration = require("../models/promptGenerationModel");
+const { getUser } = require("../services/userAuthService");
 const { NETWORK_ERROR, INPUT_REQUIRED, INVALID_ID, NOT_FOUND } = require("../messages/message");
 
 const SYSTEM_PROMPT = `You are an expert at writing clear, detailed prompts for AI assistants, image models, and coding tools.
@@ -23,6 +24,19 @@ function buildUserMessage(body) {
   if (!input) return "";
   if (!extra) return input;
   return `Idea:\n${input}\n\nExtra context or constraints:\n${extra}`;
+}
+
+function resolveAuthUserId(req) {
+  const raw = req.headers.authorization || "";
+  if (!raw.startsWith("Bearer ")) return null;
+  const token = raw.replace("Bearer ", "").trim();
+  if (!token) return null;
+  try {
+    const decoded = getUser(token);
+    return decoded?._id ? decoded._id.toString() : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 async function handleGeneratePrompt(req, res) {
@@ -66,7 +80,9 @@ async function handleGeneratePrompt(req, res) {
   }
 
   try {
+    const authUserId = resolveAuthUserId(req);
     const doc = await PromptGeneration.create({
+      userId: authUserId,
       input: typeof req.body.input === "string" ? req.body.input.trim() : userContent,
       generatedPrompt,
       model,
@@ -87,11 +103,16 @@ async function handleGeneratePrompt(req, res) {
 async function handleListPrompts(req, res) {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
   const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+  const authUserId = req.authUser?._id;
+  if (!authUserId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const query = { userId: authUserId };
 
   try {
     const [total, rows] = await Promise.all([
-      PromptGeneration.countDocuments({}),
-      PromptGeneration.find({})
+      PromptGeneration.countDocuments(query),
+      PromptGeneration.find(query)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -120,12 +141,19 @@ async function handleListPrompts(req, res) {
 
 async function handleGetPrompt(req, res) {
   const { id } = req.params;
+  const authUserId = req.authUser?._id;
+  if (!authUserId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: INVALID_ID });
   }
 
   try {
-    const row = await PromptGeneration.findById(id).lean();
+    const row = await PromptGeneration.findOne({
+      _id: id,
+      userId: authUserId,
+    }).lean();
     if (!row) {
       return res.status(404).json({ error: NOT_FOUND });
     }

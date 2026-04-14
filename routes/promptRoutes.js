@@ -4,11 +4,12 @@ const {
   handleListPrompts,
   handleGetPrompt,
 } = require("../controllers/promptController");
+const { authenticate } = require("../middlewares/authMiddleware");
 
 const router = express.Router();
 
 router.post("/generate", handleGeneratePrompt);
-router.get("/", handleListPrompts);
-router.get("/:id", handleGetPrompt);
+router.get("/", authenticate, handleListPrompts);
+router.get("/:id", authenticate, handleGetPrompt);
 
 module.exports = router;
