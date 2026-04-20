@@ -9,6 +9,8 @@ const userAuthRouter = require("./routes/userAuthRoutes");
 const adminRouter = require("./routes/adminRoutes");
 const adminAuthRouter = require("./routes/adminAuthRoutes");
 const notificationRouter = require("./routes/notificationRoutes");
+const appPromoRouter = require("./routes/appPromoRoutes");
+const adminPromoRouter = require("./routes/adminPromoRoutes");
 const { ensureFirebaseAdmin } = require("./utils/firebaseAdminInit");
 
 const mongoUri = process.env.MONGODB_URI;
@@ -84,12 +86,19 @@ app.get("/", (req, res) => {
         registerToken: "POST /api/notifications/register-token",
         send: "POST /api/notifications/send",
       },
+      promos: {
+        list: "GET /api/app-promos",
+        getOne: "GET /api/app-promos/:id",
+      },
       admin: {
         login: "POST /api/admin/auth/login",
         users: "GET /api/admin/users",
         usage: "GET /api/admin/usage",
         banUser: "PATCH /api/admin/users/:id/ban",
         broadcastNotification: "POST /api/admin/notifications/broadcast",
+        createPromo: "POST /api/admin/app-promos",
+        updatePromo: "PUT/PATCH /api/admin/app-promos/:id",
+        deletePromo: "DELETE /api/admin/app-promos/:id",
       },
     },
   });
@@ -98,8 +107,10 @@ app.get("/", (req, res) => {
 app.use("/auth", userAuthRouter);
 app.use("/api/prompts", promptRouter);
 app.use("/api/notifications", notificationRouter);
+app.use("/api/app-promos", appPromoRouter);
 app.use("/api/admin/auth", adminAuthRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/admin/app-promos", adminPromoRouter);
 
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
