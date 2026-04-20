@@ -59,10 +59,15 @@ function ensureFirebaseAdmin() {
     return null;
   }
 
-  if (!admin.apps || admin.apps.length === 0) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
+  try {
+    if (!admin.apps || admin.apps.length === 0) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    }
+  } catch (error) {
+    console.error("[firebase] initializeApp failed:", error.message);
+    return null;
   }
 
   cachedAdmin = admin;

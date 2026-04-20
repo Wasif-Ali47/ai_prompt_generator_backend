@@ -19,17 +19,49 @@ if (!mongoUri) {
 
 const app = express();
 const port = Number(process.env.PORT) || 8000;
+const defaultAllowedOrigins = [
+  "http://localhost:3000",
+  "https://aipromptgenerator.oxmite.com",
+  "https://prompt-creator-admin.oxmite.com",
+];
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
+  : defaultAllowedOrigins;
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    console.warn(`[cors] blocked origin: ${origin}`);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Origin", "X-Requested-With", "Content-Type", "Accept", "Authorization"],
+  optionsSuccessStatus: 204,
+};
 
 app.use("/uploads", express.static("uploads"));
 app.use(
-  cors({
-    origin: true,
-    credentials: true,
-  })
+  cors(corsOptions)
 );
+app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "4mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(ensureBody);
+
+app.use((req, res, next) => {
+  if (req.path.includes("/api/admin/auth/login")) {
+    console.log(
+      `[admin-login:request] ${req.method} ${req.originalUrl} origin=${req.headers.origin || "n/a"} contentType=${req.headers["content-type"] || "n/a"}`
+    );
+  }
+  next();
+});
 
 app.get("/", (req, res) => {
   res.json({
@@ -73,8 +105,17 @@ app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
+app.use((error, req, res, next) => {
+  console.error(`[express-error] ${req.method} ${req.originalUrl}:`, error.message);
+  if (res.headersSent) {
+    return next(error);
+  }
+  return res.status(500).json({ error: "Internal server error" });
+});
+
 MongoDBConnect(mongoUri)
   .then(() => {
+    console.log(`[cors] allowed origins: ${allowedOrigins.join(", ")}`);
     const firebaseAdmin = ensureFirebaseAdmin();
     console.log(
       `[firebase] Push notifications: ${firebaseAdmin ? "ready" : "not configured (set FIREBASE_SERVICE_ACCOUNT or firebase-service-account.json)"}`
@@ -84,4 +125,11 @@ MongoDBConnect(mongoUri)
     });
   })
   .catch(() => process.exit(1));
-  // jdei
+
+process.on("uncaughtException", (error) => {
+  console.error("[process] uncaughtException:", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] unhandledRejection:", reason);
+});
